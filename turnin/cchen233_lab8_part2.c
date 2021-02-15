@@ -75,20 +75,15 @@ void TimerOff(){
 ISR(TIMER1_COMPA_vect){
 	_avr_timer_cntcurr--;
 	if (_avr_timer_cntcurr == 0) {
-			TimerISR();
-			_avr_timer_cntcurr = _avr_timer_M;
-			}
+		TimerISR();
+		_avr_timer_cntcurr = _avr_timer_M;
+	}
 }
 
 void TimerSet(unsigned long M) {
 	_avr_timer_M = M;
 	_avr_timer_cntcurr = _avr_timer_M;
 }
-
-unsigned char tmpDT1;
-unsigned char tmpDT2;
-unsigned char tmpDT4;
-
 
 
 typedef struct task {
@@ -98,30 +93,17 @@ typedef struct task {
   int (*TickFct)(int); // Function to call for task's tick
 } task;
 
-task tasks[5];
+task tasks[2];
 
-const unsigned char tasksNum = 5;
+const unsigned char tasksNum = 2;
 const unsigned long tasksPeriodGCD = 1;
-const unsigned long periodBlinkLED = 1000;
-const unsigned long periodThreeLEDs = 300;
-unsigned long periodSpeaker = 2;
-const unsigned long periodCombined = 1;
-const unsigned long periodSample = 200;
+const unsigned long periodSample = 100;
 
-enum BL_States { BL_SMStart, BL_s1 };
-int TickFct_BlinkLED(int state);
-
-int TickFct_ThreeLEDs(int state);
-enum TL_States { TL_SMStart, TL_s1, TL_s2, TL_s3 };
-
-enum combined_States { C_SMStart, C_s1 };
-int TickFct_Combined(int state);
-
-enum SP_States { SP_SMStart, SP_s0, SP_s1};
-int TickFct_Speaker(int state);
-
-enum FRQ_States { FRQ_SMStart, FRQ_s0, FRQ_inc, FRQ_dec};
+enum FRQ_States { FRQ_SMStart, FRQ_s0, FRQ_1, FRQ_2, FRQ_3};
 int TickFct_FRQ(int state);
+
+enum OnOff_States { OnOff_SMStart, s_Off, s_On};
+int TickFct_OnOff(int state);
 
 void TimerISR() {
   unsigned char i;
@@ -134,46 +116,30 @@ void TimerISR() {
   }
 }
 
+double frequency[8] = {261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25};
+int key = 4;
+
 int main() {
 
-  DDRD = 0x1F;
-  PORTD = 0x00;
-
+  DDRB = 0x40; 
+  PORTB = 0x00;
   DDRA = 0x00;
   PORTA = 0x07;
   unsigned char i=0;
-  tasks[i].state = BL_SMStart;
-  tasks[i].period = periodBlinkLED;
-  tasks[i].elapsedTime = tasks[i].period;
-  tasks[i].TickFct = &TickFct_BlinkLED;
-  ++i;
-  tasks[i].state = TL_SMStart;
-  tasks[i].period = periodThreeLEDs;
-  tasks[i].elapsedTime = tasks[i].period;
-  tasks[i].TickFct = &TickFct_ThreeLEDs;
-  ++i;
-  tasks[i].state = C_SMStart;
-  tasks[i].period = periodCombined;
-  tasks[i].elapsedTime = tasks[i].period;
-  tasks[i].TickFct = &TickFct_Combined;
-  TimerSet(tasksPeriodGCD);
-  ++i;
-  tasks[i].state = SP_SMStart;
-  tasks[i].period = periodSpeaker;
-  tasks[i].elapsedTime = tasks[i].period;
-  tasks[i].TickFct = &TickFct_Speaker;
-  TimerSet(tasksPeriodGCD);
-  ++i;
   tasks[i].state = FRQ_SMStart;
   tasks[i].period = periodSample;
   tasks[i].elapsedTime = tasks[i].period;
   tasks[i].TickFct = &TickFct_FRQ;
   TimerSet(tasksPeriodGCD);
+  i++;
+  tasks[i].state = OnOff_SMStart;
+  tasks[i].period = periodSample;
+  tasks[i].elapsedTime = tasks[i].period;
+  tasks[i].TickFct = &TickFct_OnOff;
+  TimerSet(tasksPeriodGCD);
 
-  
   TimerOn();
-
-  
+  PWM_on();
   
   while(1) {
      //Sleep();
@@ -181,119 +147,33 @@ int main() {
   return 0;
 }
 
-int TickFct_BlinkLED(int state) {
+int TickFct_OnOff(int state) {
+  unsigned char tmpA = (~PINA & 0x04) >> 2; 
   switch(state) { // Transitions
-     case BL_SMStart: // Initial transition
-        tmpDT1 = 0; // Initialization behavior
-        state = BL_s1;
+     case OnOff_SMStart: // Initial transition
+        state = s_Off;
         break;
-     case BL_s1:
-        state = BL_s1;
+     case s_Off:
+	if (tmpA == 0x01) state = s_On;
+	else state = s_Off;
+        break;
+     case s_On:
+	if (tmpA == 0x01) state = s_Off;
+	else state = s_On;
         break;
      default:
-        state = BL_SMStart;
+        state = OnOff_SMStart;
+	break;
    } // Transitions
 
   switch(state) { // State actions
-     case BL_s1:
-        tmpDT1 ^= 0x08;
+     case OnOff_SMStart: // Initial transition
         break;
-     default:
+     case s_Off:
+	set_PWM(0);
         break;
-  } // State actions
-  //PORTD = tmpDT1;
-  return state;
-}
-
-int TickFct_ThreeLEDs(int state) {
-  switch(state) { // Transitions
-     case TL_SMStart: // Initial transition
-        state = TL_s1;
-        break;
-     case TL_s1:
-        state = TL_s2;
-        break;
-     case TL_s2:
-        state = TL_s3;
-        break;
-     case TL_s3:
-        state = TL_s1;
-        break;
-     default:
-        state = TL_SMStart;
-   } // Transitions
-
-  switch(state) { // State actions
-     case TL_s1:
-	tmpDT2 = 0x01;
-        break;
-     case TL_s2:
-	tmpDT2 = 0x02;
-        break;
-     case TL_s3:
-	tmpDT2 = 0x04;
-        break;
-     default:
-        break;
-  } // State actions
-  //PORTD = tmpDT2;
-  return state;
-}
-
-int TickFct_Combined(int state) {
-  switch(state) { // Transitions
-     case C_SMStart: // Initial transition
-        state = C_s1;
-        break;
-     case C_s1:
-        state = C_s1;
-        break;
-     default:
-        state = C_SMStart;
-   } // Transitions
-
-  switch(state) { // State actions
-     case C_SMStart: // Initial transition
-     	PORTD = tmpDT1 | tmpDT2 | tmpDT4; 
-        break;
-     case C_s1:
-     	PORTD = tmpDT1 | tmpDT2 | tmpDT4; 
-        break;
-     default:
-     	PORTD = tmpDT1 | tmpDT2 | tmpDT4; 
-        break;
-  } // State actions
-  return state;
-}
-
-int TickFct_Speaker(int state) {
-	unsigned char tmpA = (~PINA & 0x04) >> 2; 
-  switch(state) { // Transitions
-     case SP_SMStart: // Initial transition
-        tmpDT4 = 0; // Initialization behavior
-        state = SP_s0;
-        break;
-     case SP_s0:
-	if(tmpA == 0x01)
-		state = SP_s1;
-	else
-		state = SP_s0;
-     case SP_s1:
-	if(tmpA == 0x01)
-        	state = SP_s1;
-	else
-		state = SP_s0;
-        break;
-     default:
-        state = SP_SMStart;
-   } // Transitions
-
-  switch(state) { // State actions
-     case SP_s0:
-        tmpDT4 = 0x00;
-        break;
-     case SP_s1:
-        tmpDT4 ^= 0x10;
+     case s_On:
+	set_PWM(frequency[key]);
         break;
      default:
         break;
@@ -311,34 +191,32 @@ unsigned char tmpA = (~PINA & 0x03);
 	if(tmpA == 0x00)
 		state = FRQ_s0;
 	else if(tmpA == 0x01)
-		state = FRQ_dec;
+		state = FRQ_1;
 	else if(tmpA == 0x02)
-		state = FRQ_inc;
+		state = FRQ_2;
 	break;
-     case FRQ_inc:
+     case FRQ_1:
 	state = FRQ_s0;
-        break;
-     case FRQ_dec:
+	break;
+     case FRQ_2:
 	state = FRQ_s0;
-        break;
+	break;
      default:
         state = FRQ_SMStart;
    } // Transitions
 
   switch(state) { // State actions
      case FRQ_s0:
-  	//tasks[3].period = 1;
         break;
-     case FRQ_inc:
-        periodSpeaker--;
-  	tasks[3].period = periodSpeaker;
+     case FRQ_1:
+	if (key < 7 ) key++;
         break;
-     case FRQ_dec:
-        periodSpeaker++;
-  	tasks[3].period = periodSpeaker;
+     case FRQ_2:
+	if (key > 0 ) key--;
         break;
      default:
         break;
   } // State actions
+  set_PWM(frequency[key]);
   return state;
 }
